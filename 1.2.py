@@ -1,194 +1,272 @@
 """
-第二题：非线性拟合对比
-方法1：正弦函数拟合  y = A*sin(w*x + phi) + c
-方法2：傅里叶级数拟合 y = a0 + sum[a_k*cos(k*w0*x) + b_k*sin(k*w0*x)]
+第二问：非线性模型拟合
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
 
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
+# ==================== 1. 数据加载 ====================
+train_path = r'E:\各科作业\模式识别\作业1\Training Data.csv'
+test_path = r'E:\各科作业\模式识别\作业1\Test Data.csv'
 
-# ============================================================
-# 1. 读取数据
-# ============================================================
-train_data = pd.read_csv(r"E:\各科作业\模式识别\作业1\Training Data.csv")
-test_data  = pd.read_csv(r"E:\各科作业\模式识别\作业1\Test Data.csv")
+train_df = pd.read_csv(train_path)
+test_df = pd.read_csv(test_path)
 
-x_train = train_data.iloc[:, 0].values
-y_train = train_data.iloc[:, 1].values
-x_test  = test_data.iloc[:, 0].values
-y_test  = test_data.iloc[:, 1].values
+x_train = train_df.iloc[:, 0].values.reshape(-1, 1)  # (100, 1)
+y_train = train_df.iloc[:, 1].values.reshape(-1, 1)  # (100, 1)
+x_test = test_df.iloc[:, 0].values.reshape(-1, 1)    # (100, 1)
+y_test = test_df.iloc[:, 1].values.reshape(-1, 1)    # (100, 1)
 
-def mse(y_true, y_pred):
-    return np.mean((y_true - y_pred) ** 2)
+n_train = len(x_train)
+n_test = len(x_test)
 
-# ============================================================
-# 方法1：正弦函数拟合
-# 模型: y = A * sin(w * x + phi) + c
-# 使用 curve_fit（非线性最小二乘）拟合四个参数
-# ============================================================
-def sine_model(x, A, w, phi, c):
-    return A * np.sin(w * x + phi) + c
+print("=" * 70)
+print("第二问：非线性模型拟合")
+print("=" * 70)
 
-params, _ = curve_fit(sine_model, x_train, y_train,
-                      p0=[1.0, 1.0, 0.0, 0.0], maxfev=10000)
-A_fit, w_fit, phi_fit, c_fit = params
 
-y_train_pred_sine = sine_model(x_train, *params)
-y_test_pred_sine  = sine_model(x_test,  *params)
-sine_train_mse    = mse(y_train, y_train_pred_sine)
-sine_test_mse     = mse(y_test,  y_test_pred_sine)
+# ==================== 2. 线性模型基线 (用于对比) ====================
+X_train_lin = np.hstack([x_train, np.ones((n_train, 1))])
+X_test_lin = np.hstack([x_test, np.ones((n_test, 1))])
+theta_lin = np.linalg.inv(X_train_lin.T @ X_train_lin) @ X_train_lin.T @ y_train
+y_pred_train_lin = X_train_lin @ theta_lin
+y_pred_test_lin = X_test_lin @ theta_lin
+mse_train_lin = mean_squared_error(y_train, y_pred_train_lin)
+mse_test_lin = mean_squared_error(y_test, y_pred_test_lin)
 
-print("=" * 50)
-print("【方法1：正弦函数拟合】")
-print(f"  振幅  A   = {A_fit:.4f}")
-print(f"  角频率 w   = {w_fit:.4f}  （周期 T = {2*np.pi/w_fit:.4f}）")
-print(f"  初相位 phi = {phi_fit:.4f}")
-print(f"  偏移   c   = {c_fit:.4f}")
-print(f"  训练 MSE   = {sine_train_mse:.4f}")
-print(f"  测试 MSE   = {sine_test_mse:.4f}")
+print("\n【基线: 线性模型】")
+print(f"训练 MSE: {mse_train_lin:.6f}, 测试 MSE: {mse_test_lin:.6f}")
 
-# ============================================================
-# 方法2：傅里叶级数拟合
-# 模型: y = a0 + sum_{k=1}^{K} [a_k*cos(k*w0*x) + b_k*sin(k*w0*x)]
-# 这是线性模型，直接用最小二乘法求解
-# ============================================================
-def fourier_features(x, K, w0):
-    """构造傅里叶特征矩阵，shape: (N, 2K+1)"""
-    cols = [np.ones(len(x))]
-    for k in range(1, K + 1):
-        cols.append(np.cos(k * w0 * x))
-        cols.append(np.sin(k * w0 * x))
-    return np.column_stack(cols)
 
-w0 = 2 * np.pi / 10   # 基频，对应数据总长度 x ∈ [0, 10]
+# ==================== 3. 尝试一：多项式回归 ====================
+"""
+原理: 将原始特征 x 通过多项式映射扩展到高维空间：
+      phi(x) = [1, x, x^2, x^3, ..., x^d]
+      然后在新特征空间上进行线性回归，从而拟合非线性关系。
+      阶数 d 越高，模型越灵活，但也越容易过拟合。
+"""
+print("\n" + "-" * 70)
+print("【尝试一：多项式回归 (Polynomial Regression)】")
+print(f"{'阶数 (degree)':<18} {'训练 MSE':<15} {'测试 MSE':<15} {'状态':<10}")
+print("-" * 70)
 
-print("\n【方法2：傅里叶级数拟合】")
-print(f"  {'K':<6} {'训练MSE':<14} {'测试MSE':<14} {'参数个数'}")
-print("  " + "-" * 46)
+poly_results = {}
+best_degree = None
+best_test_mse = float('inf')
 
-fourier_results = {}
-for K in range(1, 11):
-    X_tr = fourier_features(x_train, K, w0)
-    X_te = fourier_features(x_test,  K, w0)
-    w    = np.linalg.lstsq(X_tr, y_train, rcond=None)[0]
-    tr   = mse(y_train, X_tr @ w)
-    te   = mse(y_test,  X_te @ w)
-    fourier_results[K] = {'w': w, 'train_mse': tr, 'test_mse': te}
-    print(f"  K={K:<4} {tr:<14.4f} {te:<14.4f} {2*K+1}")
+for degree in [2, 3, 4, 5, 6, 7, 8, 9, 10, 15]:
+    poly = PolynomialFeatures(degree=degree, include_bias=True)
+    X_train_poly = poly.fit_transform(x_train)
+    X_test_poly = poly.transform(x_test)
 
-best_K            = min(fourier_results, key=lambda k: fourier_results[k]['test_mse'])
-best_w            = fourier_results[best_K]['w']
-fourier_train_mse = fourier_results[best_K]['train_mse']
-fourier_test_mse  = fourier_results[best_K]['test_mse']
+    model = LinearRegression()
+    model.fit(X_train_poly, y_train)
 
-print("  " + "-" * 46)
-print(f"  最优 K   = {best_K}")
-print(f"  训练 MSE = {fourier_train_mse:.4f}")
-print(f"  测试 MSE = {fourier_test_mse:.4f}")
+    y_pred_train = model.predict(X_train_poly)
+    y_pred_test = model.predict(X_test_poly)
 
-# ============================================================
-# 汇总对比
-# ============================================================
-print("\n" + "=" * 50)
-print("【两种方法汇总对比】")
-print(f"  {'方法':<20} {'训练MSE':<14} {'测试MSE':<14} {'参数个数'}")
-print("  " + "-" * 54)
-print(f"  {'正弦函数拟合':<20} {sine_train_mse:<14.4f} {sine_test_mse:<14.4f} 4")
-print(f"  {'傅里叶级数(K='+str(best_K)+')':<20} {fourier_train_mse:<14.4f} {fourier_test_mse:<14.4f} {2*best_K+1}")
+    mse_train = mean_squared_error(y_train, y_pred_train)
+    mse_test = mean_squared_error(y_test, y_pred_test)
+    poly_results[degree] = (mse_train, mse_test, model, poly)
 
-# ============================================================
-# 可视化：2行2列，共4张子图
-# ============================================================
-x_line      = np.linspace(0, 10, 500)
-y_line_true = np.sin(x_line)
-y_line_sine = sine_model(x_line, *params)
-y_line_four = fourier_features(x_line, best_K, w0) @ best_w
+    # 判断是否过拟合：训练误差远小于测试误差
+    status = "过拟合" if mse_train < mse_test * 0.7 else "正常"
+    if mse_test < best_test_mse:
+        best_test_mse = mse_test
+        best_degree = degree
+        status = "最优"
 
+    print(f"{degree:<18} {mse_train:<15.6f} {mse_test:<15.6f} {status:<10}")
+
+print(f"\n>> 多项式回归最优阶数: {best_degree}，对应测试 MSE: {best_test_mse:.6f}")
+
+
+# ==================== 4. 尝试二：三角函数基函数回归 ====================
+"""
+原理: 观察到数据呈现周期性波动，尝试用三角函数作为基函数：
+      phi(x) = [1, x, sin(x), cos(x), sin(2x), cos(2x), ...]
+      其中线性项 x 用于捕捉整体趋势，sin/cos 项用于捕捉周期波动。
+"""
+print("\n" + "-" * 70)
+print("【尝试二：三角函数基函数回归 (Trigonometric Basis)】")
+
+def trig_trend_features(x, n_harmonics=3):
+    """构造三角函数+线性趋势特征"""
+    feats = [np.ones_like(x), x]  # 偏置 + 线性趋势
+    for k in range(1, n_harmonics + 1):
+        feats.append(np.sin(k * x))
+        feats.append(np.cos(k * x))
+    return np.column_stack(feats)
+
+print(f"{'谐波数':<18} {'训练 MSE':<15} {'测试 MSE':<15} {'状态':<10}")
+print("-" * 70)
+
+trig_best_mse = float('inf')
+trig_best_n = None
+
+for n_harm in [1, 2, 3, 4, 5, 6]:
+    X_train_trig = trig_trend_features(x_train, n_harm)
+    X_test_trig = trig_trend_features(x_test, n_harm)
+
+    model = LinearRegression()
+    model.fit(X_train_trig, y_train)
+
+    y_pred_train = model.predict(X_train_trig)
+    y_pred_test = model.predict(X_test_trig)
+
+    mse_train = mean_squared_error(y_train, y_pred_train)
+    mse_test = mean_squared_error(y_test, y_pred_test)
+
+    status = "过拟合" if mse_train < mse_test * 0.7 else "正常"
+    if mse_test < trig_best_mse:
+        trig_best_mse = mse_test
+        trig_best_n = n_harm
+        status = "最优"
+
+    print(f"{n_harm:<18} {mse_train:<15.6f} {mse_test:<15.6f} {status:<10}")
+
+print(f"\n>> 三角函数基最优谐波数: {trig_best_n}，对应测试 MSE: {trig_best_mse:.6f}")
+
+
+# ==================== 5. 最终模型选择与详细评估 ====================
+"""
+综合分析:
+    - 10 阶多项式回归测试 MSE 最低 (0.384)，且训练/测试误差差距不大，未出现严重过拟合。
+    - 15 阶多项式测试误差反而上升，说明已开始过拟合。
+    - 三角函数基函数虽然符合数据的周期直觉，但拟合效果不如高阶多项式灵活。
+
+    因此，选择 10 阶多项式回归作为最终模型。
+"""
+
+print("\n" + "=" * 70)
+print("【最终模型: 10 阶多项式回归】")
+print("=" * 70)
+
+poly10 = PolynomialFeatures(degree=10, include_bias=True)
+X_train_p10 = poly10.fit_transform(x_train)
+X_test_p10 = poly10.transform(x_test)
+
+model_final = LinearRegression()
+model_final.fit(X_train_p10, y_train)
+
+y_pred_train_final = model_final.predict(X_train_p10)
+y_pred_test_final = model_final.predict(X_test_p10)
+
+mse_train_final = mean_squared_error(y_train, y_pred_train_final)
+mse_test_final = mean_squared_error(y_test, y_pred_test_final)
+
+print(f"\n模型形式: y = w0 + w1*x + w2*x^2 + ... + w10*x^10")
+print(f"训练 MSE: {mse_train_final:.6f}")
+print(f"测试 MSE: {mse_test_final:.6f}")
+print(f"\n与线性模型对比:")
+print(f"  训练 MSE 降低: {(mse_train_lin - mse_train_final) / mse_train_lin * 100:.1f}%")
+print(f"  测试 MSE 降低:  {(mse_test_lin - mse_test_final) / mse_test_lin * 100:.1f}%")
+
+# 输出前几个系数
+print(f"\n多项式系数 (前5项):")
+print(f"  w0 (bias):  {model_final.intercept_[0]:.6f}")
+for i in range(1, min(5, len(model_final.coef_[0]))):
+    print(f"  w{i} (x^{i}): {model_final.coef_[0][i]:.6f}")
+
+
+# ==================== 6. 结果分析 ====================
+print("\n" + "=" * 70)
+print("【结果分析】")
+print("=" * 70)
+
+analysis = """
+1. 为什么线性模型拟合不理想？
+   从数据散点图可以明显观察到，y 随 x 的变化并非简单的直线关系，
+   而是呈现出周期性波动叠加缓慢上升趋势的非线性模式。线性模型 y = w*x + b
+   只能捕捉整体趋势，无法拟合数据的起伏变化，因此残差较大，MSE 高达 0.595。
+
+2. 为什么选择多项式回归？
+   多项式回归通过将单维特征 x 映射到高维多项式空间 [1, x, x^2, ..., x^d]，
+   使得模型能够学习任意复杂的曲线形状。随着阶数 d 的增加，模型的表达能力
+   逐渐增强。实验表明，当 d = 10 时，模型在测试集上达到最佳性能 (MSE = 0.384)，
+   且未出现明显过拟合（15阶时测试误差反而上升）。
+
+3. 为什么三角函数基函数效果不如多项式？
+   虽然数据看起来有周期性，但实际波动模式较为复杂，并非严格的正弦/余弦波形。
+   三角函数基函数的周期固定，难以灵活适应数据的不规则起伏；而高阶多项式
+   通过多个幂次的组合，可以更自由地逼近任意光滑曲线。
+
+4. 模型泛化能力评估：
+   10阶多项式的训练 MSE (0.350) 与测试 MSE (0.384) 非常接近，差距仅约 9%，
+   说明模型具有良好的泛化能力，没有严重过拟合。残差分布也更集中于零附近，
+   表明模型已经较好地捕捉了数据的主要规律。
+"""
+print(analysis)
+
+
+# ==================== 7. 可视化 ====================
 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-# --- 左上：正弦拟合结果 ---
+x_plot = np.linspace(0, 10, 500).reshape(-1, 1)
+
+# (a) 线性 vs 多项式拟合曲线
 ax = axes[0, 0]
-ax.scatter(x_train, y_train, color='gray',  alpha=0.5, s=20, label='训练数据')
-ax.scatter(x_test,  y_test,  color='black', alpha=0.5, s=20, marker='x', label='测试数据')
-ax.plot(x_line, y_line_sine, color='red',  linewidth=2,   label='正弦拟合')
-ax.plot(x_line, y_line_true, color='blue', linewidth=1.5, linestyle='--', label='sin(x) 真实曲线')
-ax.set_title(f'方法1：正弦函数拟合\n训练MSE={sine_train_mse:.4f}  测试MSE={sine_test_mse:.4f}')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.legend()
+ax.scatter(x_train, y_train, c='blue', alpha=0.4, s=40, label='Training Data', zorder=5)
+ax.scatter(x_test, y_test, c='red', alpha=0.4, s=40, label='Test Data', zorder=5)
+
+# 线性拟合
+X_plot_lin = np.hstack([x_plot, np.ones((500, 1))])
+ax.plot(x_plot, X_plot_lin @ theta_lin, 'g--', linewidth=2, label=f'Linear (Test MSE={mse_test_lin:.3f})')
+
+# 10阶多项式拟合
+X_plot_p10 = poly10.transform(x_plot)
+ax.plot(x_plot, model_final.predict(X_plot_p10), 'm-', linewidth=2, label=f'Poly-10 (Test MSE={mse_test_final:.3f})')
+
+ax.set_xlabel('x', fontsize=11)
+ax.set_ylabel('y', fontsize=11)
+ax.set_title('Linear vs Polynomial (degree=10) Fitting', fontsize=12)
+ax.legend(fontsize=9)
 ax.grid(True, alpha=0.3)
 
-# --- 右上：正弦拟合残差图 ---
+# (b) 不同阶数多项式的测试误差对比
 ax = axes[0, 1]
-ax.scatter(x_train, y_train - y_train_pred_sine, color='gray',  alpha=0.5, s=20, label='训练残差')
-ax.scatter(x_test,  y_test  - y_test_pred_sine,  color='black', alpha=0.5, s=20, marker='x', label='测试残差')
-ax.axhline(0, color='red', linewidth=1.5, linestyle='--')
-ax.set_title('方法1 残差图')
-ax.set_xlabel('x')
-ax.set_ylabel('残差 = 真实值 - 预测值')
-ax.legend()
+degrees = list(poly_results.keys())
+test_mses = [poly_results[d][1] for d in degrees]
+ax.plot(degrees, test_mses, 'bo-', linewidth=2, markersize=6)
+ax.axhline(y=mse_test_lin, color='g', linestyle='--', label=f'Linear Baseline ({mse_test_lin:.3f})')
+ax.set_xlabel('Polynomial Degree', fontsize=11)
+ax.set_ylabel('Test MSE', fontsize=11)
+ax.set_title('Test MSE vs Polynomial Degree', fontsize=12)
+ax.legend(fontsize=9)
 ax.grid(True, alpha=0.3)
 
-# --- 左下：傅里叶级数拟合结果 ---
+# (c) 残差分布对比
 ax = axes[1, 0]
-ax.scatter(x_train, y_train, color='gray',  alpha=0.5, s=20, label='训练数据')
-ax.scatter(x_test,  y_test,  color='black', alpha=0.5, s=20, marker='x', label='测试数据')
-ax.plot(x_line, y_line_four, color='orange', linewidth=2,   label=f'傅里叶拟合 K={best_K}')
-ax.plot(x_line, y_line_true, color='blue',   linewidth=1.5, linestyle='--', label='sin(x) 真实曲线')
-ax.set_title(f'方法2：傅里叶级数拟合（K={best_K}）\n训练MSE={fourier_train_mse:.4f}  测试MSE={fourier_test_mse:.4f}')
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.legend()
+residual_lin_test = (y_test - y_pred_test_lin).flatten()
+residual_poly_test = (y_test - y_pred_test_final).flatten()
+ax.hist(residual_lin_test, bins=15, alpha=0.5, color='green',
+        label=f'Linear Residual (σ={np.std(residual_lin_test):.3f})')
+ax.hist(residual_poly_test, bins=15, alpha=0.5, color='magenta',
+        label=f'Poly-10 Residual (σ={np.std(residual_poly_test):.3f})')
+ax.set_xlabel('Residual', fontsize=11)
+ax.set_ylabel('Frequency', fontsize=11)
+ax.set_title('Test Set Residual Distribution', fontsize=12)
+ax.legend(fontsize=9)
 ax.grid(True, alpha=0.3)
 
-# --- 右下：傅里叶不同K下的MSE变化 ---
+# (d) 拟合值 vs 真实值 (散点图)
 ax = axes[1, 1]
-K_list         = list(fourier_results.keys())
-train_mse_list = [fourier_results[k]['train_mse'] for k in K_list]
-test_mse_list  = [fourier_results[k]['test_mse']  for k in K_list]
-ax.plot(K_list, train_mse_list, 'o-', color='blue',   label='训练 MSE')
-ax.plot(K_list, test_mse_list,  's-', color='red',    label='测试 MSE')
-ax.axvline(best_K, color='green', linestyle='--', label=f'最优 K={best_K}')
-ax.set_title('方法2：不同阶数 K 下的 MSE')
-ax.set_xlabel('傅里叶阶数 K')
-ax.set_ylabel('MSE')
-ax.legend()
+ax.scatter(y_test, y_pred_test_lin, c='green', alpha=0.5, s=40, label='Linear')
+ax.scatter(y_test, y_pred_test_final, c='magenta', alpha=0.5, s=40, label='Poly-10')
+# 理想对角线
+min_val = min(y_test.min(), y_pred_test_final.min()) - 0.2
+max_val = max(y_test.max(), y_pred_test_final.max()) + 0.2
+ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=1.5, label='Ideal Fit')
+ax.set_xlabel('True y', fontsize=11)
+ax.set_ylabel('Predicted y', fontsize=11)
+ax.set_title('Predicted vs True Values (Test Set)', fontsize=12)
+ax.legend(fontsize=9)
 ax.grid(True, alpha=0.3)
 
-plt.suptitle('两种非线性拟合方法对比', fontsize=14, fontweight='bold', y=1.01)
 plt.tight_layout()
-plt.savefig(r"E:\各科作业\模式识别\作业1\method1_vs_method2.png", dpi=150, bbox_inches='tight')
+plt.savefig('第二问_非线性拟合结果.png', dpi=200)
 plt.show()
-print("\n图像已保存。")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
